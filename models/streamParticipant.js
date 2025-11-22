@@ -10,7 +10,8 @@ const StreamParticipant = sequelize.define('StreamParticipant', {
   level: { type: DataTypes.INTEGER, defaultValue: 1 },
   puntos: { type: DataTypes.INTEGER, defaultValue: 0 },
   joined_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
-  left_at: { type: DataTypes.DATE, allowNull: true }
+  left_at: { type: DataTypes.DATE, allowNull: true },
+  accumulated_seconds: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }
 }, {
   tableName: 'stream_participants',
   underscored: true

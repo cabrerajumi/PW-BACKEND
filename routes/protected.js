@@ -4,6 +4,7 @@ var auth = require('../middlewares/jwtAuth');
 var Usuario = require('../models/user');
 var StreamParticipant = require('../models/streamParticipant');
 var Stream = require('../models/stream');
+var Message = require('../models/message');
 
 // Devuelve el perfil del usuario autenticado
 router.get('/mi-perfil', auth.authenticateToken, async function(req, res) {
@@ -104,13 +105,43 @@ router.post('/mi-perfil/puntos', auth.authenticateToken, async function(req, res
         participante = await StreamParticipant.create({ stream_id: stream.id, user_id: req.user.id, level: 1, puntos: 0 });
       }
       participante.puntos = (participante.puntos || 0) + delta;
-      // Nivel por stream: misma regla que antes
-      while (participante.puntos >= (participante.level || 1) * 100) {
-        participante.puntos = participante.puntos - (participante.level || 1) * 100;
-        participante.level = (participante.level || 1) + 1;
+      // Nivel por stream: usar tabla level_settings si existe, fallback a level*100
+      let leveled = false;
+      try {
+        const LevelSetting = require('../models/levelSetting');
+        // helper to get threshold for a given level
+        const getThreshold = async (lvl) => {
+          const row = await LevelSetting.findOne({ where: { level: lvl } });
+          return row ? row.points_required : (lvl * 100);
+        };
+        while (true) {
+          const threshold = await getThreshold(participante.level || 1);
+          if (participante.puntos >= threshold) {
+            participante.puntos = participante.puntos - threshold;
+            participante.level = (participante.level || 1) + 1;
+            leveled = true;
+            continue;
+          }
+          break;
+        }
+      } catch (e) {
+        // fallback to old behavior
+        while (participante.puntos >= (participante.level || 1) * 100) {
+          participante.puntos = participante.puntos - (participante.level || 1) * 100;
+          participante.level = (participante.level || 1) + 1;
+          leveled = true;
+        }
       }
       await participante.save();
       console.log('Updated stream_participants for user', req.user.id, 'stream', stream.id, 'new level', participante.level, 'new puntos', participante.puntos);
+      // If leveled, create chat message announcing level up
+      if (leveled) {
+        try {
+          const usuario = await require('../models/user').findByPk(req.user.id);
+          const name = usuario ? (usuario.nombre || usuario.correo || `Usuario ${req.user.id}`) : `Usuario ${req.user.id}`;
+          await Message.create({ stream_id: stream.id, user_id: null, author: 'Sistema', text: `${name} ha subido al nivel ${participante.level}! 🎉` });
+        } catch (e) { console.warn('Failed to create level-up message', e && e.message); }
+      }
       return res.json({ mensaje: 'Puntos actualizados (stream)', nivel: participante.level, puntos: participante.puntos, stream_id: stream.id, target: 'stream_participants' });
     }
 

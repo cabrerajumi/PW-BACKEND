@@ -106,12 +106,57 @@ router.post('/streams/:id/participants', auth.authenticateToken, async (req, res
     let participante = await StreamParticipant.findOne({ where: { stream_id: stream.id, user_id: user.id } });
     if (!participante) {
       // Initialize participant with independent stream-scoped level/puntos
-      participante = await StreamParticipant.create({ stream_id: stream.id, user_id: user.id, level: 1, puntos: 0 });
+      participante = await StreamParticipant.create({ stream_id: stream.id, user_id: user.id, level: 1, puntos: 0, accumulated_seconds: 0 });
     }
     res.json({ participante });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error registrando participante' });
+  }
+});
+
+// List participants for a stream (include accumulated_seconds)
+router.get('/streams/:id/participants', auth.authenticateToken, async (req, res) => {
+  try {
+    const streamId = Number(req.params.id);
+    const stream = await Stream.findByPk(streamId);
+    if (!stream) return res.status(404).json({ error: 'Stream no encontrado' });
+
+    // Only streamer or authenticated users can read participants; streamer sees all
+    const userId = req.user && req.user.id;
+    // load participants and join user info
+    const parts = await StreamParticipant.findAll({ where: { stream_id: streamId } });
+    // attach basic user info
+    const userIds = parts.map(p => p.user_id).filter(Boolean);
+    const users = await Usuario.findAll({ where: { id: userIds } });
+    const usersById = users.reduce((acc, u) => { acc[u.id] = u; return acc; }, {});
+    const result = parts.map(p => ({
+      id: p.id,
+      user_id: p.user_id,
+      nombre: (usersById[p.user_id] && (usersById[p.user_id].nombre || usersById[p.user_id].correo)) || null,
+      level: p.level,
+      puntos: p.puntos,
+      accumulated_seconds: p.accumulated_seconds || 0,
+      joined_at: p.joined_at,
+      left_at: p.left_at
+    }));
+    res.json({ participants: result });
+  } catch (err) {
+    console.error('Error listing participants', err);
+    res.status(500).json({ error: 'Error listing participants' });
+  }
+});
+
+// Get single participant
+router.get('/streams/:id/participants/:userId', auth.authenticateToken, async (req, res) => {
+  try {
+    const { id, userId } = req.params;
+    const participante = await StreamParticipant.findOne({ where: { stream_id: id, user_id: userId } });
+    if (!participante) return res.status(404).json({ error: 'Participante no encontrado' });
+    res.json({ participante });
+  } catch (err) {
+    console.error('Error getting participant', err);
+    res.status(500).json({ error: 'Error obteniendo participante' });
   }
 });
 
@@ -131,11 +176,70 @@ router.put('/streams/:id/participants/:userId', auth.authenticateToken, async (r
 
     if (typeof level !== 'undefined') participante.level = Number(level);
     if (typeof puntos !== 'undefined') participante.puntos = Number(puntos);
+    if (typeof req.body.left_at !== 'undefined') participante.left_at = req.body.left_at ? new Date(req.body.left_at) : new Date();
     await participante.save();
     res.json({ participante });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error actualizando participante' });
+  }
+});
+
+// Mark participant as left (convenience endpoint, supports keepalive fetch)
+router.post('/streams/:id/participants/:userId/leave', auth.authenticateToken, async (req, res) => {
+  try {
+    const { id, userId } = req.params;
+    const participante = await StreamParticipant.findOne({ where: { stream_id: id, user_id: userId } });
+    if (!participante) return res.status(404).json({ error: 'Participante no encontrado' });
+    // allow the participant themselves or the streamer to mark leave
+    const stream = await Stream.findByPk(id);
+    if (!(req.user.id === participante.user_id || (stream && stream.streamer_id === req.user.id))) return res.status(403).json({ error: 'No autorizado' });
+    participante.left_at = new Date();
+    await participante.save();
+    res.json({ participante });
+  } catch (err) {
+    console.error('Error marking participant leave', err);
+    res.status(500).json({ error: 'Error marcando salida' });
+  }
+});
+
+// Streamer heartbeat: mark stream as actively live now
+router.post('/streams/:id/heartbeat', auth.authenticateToken, auth.authorizeRole('streamer'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const stream = await Stream.findByPk(id);
+    if (!stream) return res.status(404).json({ error: 'Stream no encontrado' });
+    if (stream.streamer_id !== req.user.id) return res.status(403).json({ error: 'No autorizado' });
+
+    // allow optional client-provided timestamp, otherwise use server time
+    const ts = req.body && req.body.at ? new Date(req.body.at) : new Date();
+    stream.last_heartbeat = ts;
+    await stream.save();
+    res.json({ last_heartbeat: stream.last_heartbeat });
+  } catch (err) {
+    console.error('Error registering heartbeat', err);
+    res.status(500).json({ error: 'Error registrando heartbeat' });
+  }
+});
+
+// Delete a stream entirely (streamer only) — removes related participants, messages and gift transactions, then the stream
+router.delete('/streams/:id', auth.authenticateToken, auth.authorizeRole('streamer'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const stream = await Stream.findByPk(id);
+    if (!stream) return res.status(404).json({ error: 'Stream no encontrado' });
+    if (stream.streamer_id !== req.user.id) return res.status(403).json({ error: 'No autorizado' });
+
+    // remove related data
+    try { const Message = require('../models/message'); await Message.destroy({ where: { stream_id: id } }); } catch (e) { /* ignore */ }
+    try { const GiftTransaction = require('../models/giftTransaction'); await GiftTransaction.destroy({ where: { stream_id: id } }); } catch (e) { /* ignore */ }
+    try { await StreamParticipant.destroy({ where: { stream_id: id } }); } catch (e) { /* ignore */ }
+
+    await stream.destroy();
+    res.json({ mensaje: 'Stream eliminado' });
+  } catch (err) {
+    console.error('Error deleting stream', err);
+    res.status(500).json({ error: 'Error eliminando stream' });
   }
 });
 

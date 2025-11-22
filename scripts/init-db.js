@@ -7,6 +7,12 @@ require('../models/user');
 try { require('../models/streamerProfile'); } catch (e) { /* optional */ }
 require('../models/stream');
 require('../models/streamParticipant');
+require('../models/message');
+// gifts
+try { require('../models/gift'); } catch (e) { /* optional */ }
+try { require('../models/giftTransaction'); } catch (e) { /* optional */ }
+// level settings (points required per level)
+try { require('../models/levelSetting'); } catch (e) { /* optional */ }
 
 async function runSqlMigration() {
   const sqlPath = path.join(__dirname, 'add_stream_participant_columns.sql');
@@ -44,6 +50,42 @@ async function init() {
     console.log('Sincronizando modelos Sequelize con { alter: true } (puede modificar el esquema)...');
     await sequelize.sync({ alter: true });
     console.log('Tablas sincronizadas.');
+
+    // Seed default gifts from frontend catalog if available
+    try {
+      const frontendGiftsPath = path.join(__dirname, '..', '..', 'ProyectoStreaming2025-erika', 'src', 'assets', 'regalos.json');
+      if (fs.existsSync(frontendGiftsPath)) {
+        console.log('Found frontend regalos.json, seeding gifts into DB:', frontendGiftsPath);
+        const raw = fs.readFileSync(frontendGiftsPath, 'utf8');
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr) && arr.length > 0) {
+          const Gift = require('../models/gift');
+          for (const g of arr) {
+            const name = g.nombre || g.name || `gift_${g.id || Date.now()}`;
+            const price = Number(g.costo || g.price || 0) || 0;
+            const points = Number(g.puntos || g.points || 0) || 0;
+            const metadata = {};
+            if (g.imagen || g.image) metadata.image = g.imagen || g.image;
+            // build a stable key from name
+            const key = (name || '').toString().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || `gift_${g.id || Date.now()}`;
+            const [row, created] = await Gift.findOrCreate({ where: { key }, defaults: { name, price, points, metadata } });
+            if (!created) {
+              // update price/points if changed
+              let changed = false;
+              if (row.price !== price) { row.price = price; changed = true; }
+              if (row.points !== points) { row.points = points; changed = true; }
+              if (Object.keys(metadata).length && JSON.stringify(row.metadata) !== JSON.stringify(metadata)) { row.metadata = metadata; changed = true; }
+              if (changed) await row.save();
+            }
+          }
+          console.log('Gifts seeded/updated from frontend catalog.');
+        }
+      } else {
+        console.log('No frontend regalos.json found at', frontendGiftsPath);
+      }
+    } catch (err) {
+      console.error('Error seeding gifts from frontend catalog:', err);
+    }
     process.exit(0);
   } catch (err) {
     console.error('Error inicializando la BD:', err);

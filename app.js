@@ -11,6 +11,11 @@ var authRouter = require('./routes/auth');
 var protectedRouter = require('./routes/protected');
 var streamsRouter = require('./routes/streams');
 var adminDebugRouter = require('./routes/admin_debug');
+var messagesRouter = require('./routes/messages');
+var giftsRouter = require('./routes/gifts');
+var levelsRouter = require('./routes/levels');
+// background workers
+try { var streamPointsWorker = require('./workers/streamPointsWorker'); } catch (e) { console.warn('streamPointsWorker not available', e && e.message); }
 
 var app = express();
 
@@ -35,6 +40,11 @@ app.use('/api', authRouter);
 app.use('/api', protectedRouter);
 app.use('/api', streamsRouter);
 app.use('/api', adminDebugRouter);
+app.use('/api', messagesRouter);
+app.use('/api', giftsRouter);
+app.use('/api', levelsRouter);
+// start background workers after routes are mounted
+try { if (streamPointsWorker && typeof streamPointsWorker.start === 'function') streamPointsWorker.start(); } catch (e) { console.warn('failed to start streamPointsWorker', e && e.message); }
 app.use('/', indexRouter);
 app.use('/users', usersRouter);
 
