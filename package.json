@@ -4,7 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "nodemon ./bin/www",
-    "start": "node ./bin/www"
+    "start": "node ./bin/www",
+    "migrate:stream-points": "node ./scripts/run_add_stream_participant_columns.js"
+    ,
+    "reset:points": "node ./scripts/reset_points.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

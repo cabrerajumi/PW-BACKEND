@@ -21,6 +21,8 @@ app.set('port', port);
 
 var server = http.createServer(app);
 
+// Socket.IO-based WebRTC signaling removed. The server now only serves the HTTP API.
+
 /**
  * Listen on provided port, on all network interfaces.
  */

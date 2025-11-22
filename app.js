@@ -9,6 +9,8 @@ var indexRouter = require('./routes/index');
 var usersRouter = require('./routes/users');
 var authRouter = require('./routes/auth');
 var protectedRouter = require('./routes/protected');
+var streamsRouter = require('./routes/streams');
+var adminDebugRouter = require('./routes/admin_debug');
 
 var app = express();
 
@@ -31,6 +33,8 @@ app.use(cors());
 
 app.use('/api', authRouter);
 app.use('/api', protectedRouter);
+app.use('/api', streamsRouter);
+app.use('/api', adminDebugRouter);
 app.use('/', indexRouter);
 app.use('/users', usersRouter);
 
