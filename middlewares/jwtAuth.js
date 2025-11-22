@@ -11,6 +11,7 @@ function authenticateToken(req, res, next) {
     req.user = decoded;
     next();
   } catch (e) {
+    console.warn('JWT verification failed:', e && e.message);
     return res.status(401).json({ error: 'invalid or expired token' });
   }
 }
